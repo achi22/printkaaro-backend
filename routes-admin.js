@@ -211,4 +211,62 @@ router.post("/orders/manual", adminAuth, async (req, res) => {
   }
 });
 
+/* ── DELETE ORDER ── */
+router.delete("/orders/:id", adminAuth, async (req, res) => {
+  try {
+    const order = await Order.findOneAndDelete({
+      $or: [{ _id: req.params.id }, { orderId: req.params.id }],
+    });
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    
+    // Also delete associated files from FileStore
+    if (order.filePath) {
+      const { FileStore } = require("./models");
+      const fileIds = order.filePath.split(",").filter(Boolean);
+      for (const fid of fileIds) {
+        try { await FileStore.findByIdAndDelete(fid); } catch (e) {}
+      }
+    }
+    
+    res.json({ success: true, message: `Order ${order.orderId} deleted` });
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+/* ── BULK DELETE OLD DELIVERED ORDERS (7+ days) ── */
+router.delete("/orders-cleanup", adminAuth, async (req, res) => {
+  try {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    // Find old delivered/cancelled orders
+    const oldOrders = await Order.find({
+      status: { $in: ["delivered", "cancelled"] },
+      updatedAt: { $lte: sevenDaysAgo },
+    });
+    
+    // Delete associated files
+    const { FileStore } = require("./models");
+    for (const order of oldOrders) {
+      if (order.filePath) {
+        const fileIds = order.filePath.split(",").filter(Boolean);
+        for (const fid of fileIds) {
+          try { await FileStore.findByIdAndDelete(fid); } catch (e) {}
+        }
+      }
+    }
+    
+    // Delete orders
+    const result = await Order.deleteMany({
+      status: { $in: ["delivered", "cancelled"] },
+      updatedAt: { $lte: sevenDaysAgo },
+    });
+    
+    res.json({ success: true, deleted: result.deletedCount, message: `Deleted ${result.deletedCount} old orders` });
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 module.exports = router;
