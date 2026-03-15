@@ -67,9 +67,45 @@ router.post("/", auth, async (req, res) => {
     });
 
     res.status(201).json({ order, freeDelivery: isFirstOrder || price >= 499 });
+
+    // Send WhatsApp notification to admin (non-blocking)
+    const addr = deliveryAddress || {};
+    const whatsappMsg = encodeURIComponent(
+      `🆕 New Order!\n\n` +
+      `📋 ${order.orderId}\n` +
+      `👤 ${addr.name || "Customer"} (${addr.phone || "N/A"})\n` +
+      `📄 ${fileName} — ${pages}p × ${copies}c\n` +
+      `🎨 ${colorMode === "bw" ? "B&W" : "Color"} | ${paperSize} | ${binding || "No Binding"}\n` +
+      `💰 ₹${totalPrice} (${paymentMethod === "cash" ? "COD" : paymentMethod})\n` +
+      `📍 ${addr.city || ""} - ${addr.pincode || ""}\n` +
+      `${isFirstOrder ? "🎉 First order — free delivery!" : ""}`
+    );
+    // Log the notification URL for admin to see in logs
+    console.log(`📱 WhatsApp Admin: https://wa.me/919239226708?text=${whatsappMsg}`);
   } catch (err) {
     console.error("Create order error:", err.message, err.errors ? JSON.stringify(err.errors) : "");
     res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+/* ── TRACK ORDER (public - no auth, just orderId + phone) ── */
+router.post("/track", async (req, res) => {
+  try {
+    const { orderId, phone } = req.body;
+    if (!orderId || !phone) return res.status(400).json({ error: "Order ID and phone required" });
+
+    const order = await Order.findOne({ orderId: orderId.trim() });
+    if (!order) return res.status(404).json({ error: "Order not found. Check your order ID." });
+
+    // Verify phone matches delivery address phone
+    const orderPhone = order.deliveryAddress?.phone || "";
+    if (orderPhone !== phone.trim() && !orderPhone.endsWith(phone.trim().slice(-10))) {
+      return res.status(403).json({ error: "Phone number doesn't match this order" });
+    }
+
+    res.json({ order });
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
   }
 });
 
