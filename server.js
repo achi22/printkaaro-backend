@@ -12,11 +12,22 @@ const app = express();
 
 /* ── MIDDLEWARE ── */
 app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL || "https://printkaaro.in",
-    "http://localhost:3000",
-    "http://localhost:5173",
-  ],
+  origin: function(origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, etc)
+    if (!origin) return callback(null, true);
+    const allowed = [
+      "https://printkaaro.in",
+      "https://www.printkaaro.in",
+      "https://printkaro.vercel.app",
+      "http://localhost:3000",
+      "http://localhost:5173",
+      "http://localhost:4000",
+    ];
+    if (allowed.includes(origin) || origin.endsWith(".vercel.app")) {
+      return callback(null, true);
+    }
+    return callback(null, true); // Allow all for now during development
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: "10mb" }));
