@@ -83,4 +83,15 @@ orderSchema.pre("validate", function (next) {
 const User = mongoose.model("User", userSchema);
 const Order = mongoose.model("Order", orderSchema);
 
-module.exports = { User, Order };
+/* ══════ FILE STORE (PDFs stored in MongoDB) ══════ */
+const fileSchema = new mongoose.Schema({
+  fileName: { type: String, required: true },
+  mimeType: { type: String, default: "application/pdf" },
+  size: { type: Number, default: 0 },
+  data: { type: String, required: true }, // base64 encoded
+  orderId: { type: String, index: true },
+}, { timestamps: true });
+
+const FileStore = mongoose.model("FileStore", fileSchema);
+
+module.exports = { User, Order, FileStore };
