@@ -66,9 +66,13 @@ async function start() {
     app.listen(PORT, () => {
       console.log(`✅ PrintKaaro API running on port ${PORT}`);
       console.log(`   Health: http://localhost:${PORT}/`);
-      console.log(`   Auth:   http://localhost:${PORT}/api/auth`);
-      console.log(`   Orders: http://localhost:${PORT}/api/orders`);
-      console.log(`   Admin:  http://localhost:${PORT}/api/admin`);
+
+      // Keep-alive: ping self every 14 minutes to prevent Render free tier from sleeping
+      const RENDER_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+      setInterval(() => {
+        fetch(`${RENDER_URL}/`).then(() => console.log("⏰ Keep-alive ping")).catch(() => {});
+      }, 14 * 60 * 1000); // Every 14 minutes
+      console.log("⏰ Keep-alive enabled (every 14 min)");
     });
   } catch (err) {
     console.error("❌ Failed to start:", err.message);
