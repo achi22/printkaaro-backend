@@ -106,9 +106,9 @@ router.get("/:id", auth, async (req, res) => {
 /* ── DOWNLOAD PDF ── */
 router.get("/:id/file", async (req, res) => {
   try {
-    // Allow auth via header OR query token OR admin password
+    // Allow auth via header OR query token OR admin password (header or query)
     const token = req.headers.authorization?.split(" ")[1] || req.query.token;
-    const adminPass = req.headers["x-admin-password"];
+    const adminPass = req.headers["x-admin-password"] || req.query.adminpass;
     
     if (!token && adminPass !== process.env.ADMIN_PASSWORD) {
       return res.status(401).json({ error: "Auth required" });
