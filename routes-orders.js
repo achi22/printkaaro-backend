@@ -41,25 +41,32 @@ router.post("/upload", auth, upload.single("file"), (req, res) => {
 /* ── CREATE ORDER ── */
 router.post("/", auth, async (req, res) => {
   try {
-    const { fileName, filePath, fileSize, pages, copies, colorMode, paperSize, sided, binding, notes, price, deliveryCharge, totalPrice, deliveryAddress, paymentMethod } = req.body;
+    const { fileName, filePath, fileSize, pages, copies, colorMode, paperSize, sided, binding, notes, price, deliveryAddress, paymentMethod } = req.body;
 
     if (!fileName || !pages || !copies || !price) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    // Free delivery: first order OR order above ₹499
+    const orderCount = await Order.countDocuments({ user: req.userId, status: { $ne: "cancelled" } });
+    const isFirstOrder = orderCount === 0;
+    let deliveryCharge = 40;
+    if (isFirstOrder || price >= 499) deliveryCharge = 0;
+    const totalPrice = price + deliveryCharge;
+
     const order = await Order.create({
       user: req.userId,
       fileName, filePath: filePath || "", fileSize: fileSize || 0,
       pages, copies, colorMode, paperSize, sided, binding, notes,
-      price, deliveryCharge: deliveryCharge || 0, totalPrice: totalPrice || price,
+      price, deliveryCharge, totalPrice,
       deliveryAddress: deliveryAddress || {},
       paymentMethod: paymentMethod || "pending",
       paymentStatus: paymentMethod === "cash" ? "captured" : "pending",
       status: "confirmed",
-      statusHistory: [{ status: "confirmed", note: "Order placed" }],
+      statusHistory: [{ status: "confirmed", note: isFirstOrder ? "First order - free delivery!" : "Order placed" }],
     });
 
-    res.status(201).json({ order });
+    res.status(201).json({ order, freeDelivery: isFirstOrder || price >= 499 });
   } catch (err) {
     console.error("Create order error:", err.message, err.errors ? JSON.stringify(err.errors) : "");
     res.status(500).json({ error: err.message || "Server error" });
@@ -97,8 +104,16 @@ router.get("/:id", auth, async (req, res) => {
 });
 
 /* ── DOWNLOAD PDF ── */
-router.get("/:id/file", auth, async (req, res) => {
+router.get("/:id/file", async (req, res) => {
   try {
+    // Allow auth via header OR query token OR admin password
+    const token = req.headers.authorization?.split(" ")[1] || req.query.token;
+    const adminPass = req.headers["x-admin-password"];
+    
+    if (!token && adminPass !== process.env.ADMIN_PASSWORD) {
+      return res.status(401).json({ error: "Auth required" });
+    }
+
     const order = await Order.findOne({
       $or: [{ _id: req.params.id }, { orderId: req.params.id }],
     });
@@ -109,6 +124,41 @@ router.get("/:id/file", auth, async (req, res) => {
 
     res.download(filePath, order.fileName);
   } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+/* ── CUSTOMER CANCEL ORDER (within 30 min) ── */
+router.patch("/:id/cancel", auth, async (req, res) => {
+  try {
+    const order = await Order.findOne({
+      $or: [{ _id: req.params.id }, { orderId: req.params.id }],
+    });
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    // Check ownership
+    if (order.user.toString() !== req.userId) {
+      return res.status(403).json({ error: "Not your order" });
+    }
+
+    // Check if already cancelled or delivered
+    if (order.status === "cancelled") return res.status(400).json({ error: "Order already cancelled" });
+    if (order.status === "delivered") return res.status(400).json({ error: "Cannot cancel delivered order" });
+
+    // Check 30 minute window
+    const minutesSinceOrder = (Date.now() - new Date(order.createdAt).getTime()) / (1000 * 60);
+    if (minutesSinceOrder > 30) {
+      return res.status(400).json({ error: "Cancellation window expired. Orders can only be cancelled within 30 minutes." });
+    }
+
+    order.status = "cancelled";
+    order.paymentStatus = order.paymentMethod === "cash" ? "cancelled" : "refunded";
+    order.statusHistory.push({ status: "cancelled", note: "Cancelled by customer within 30 min" });
+    await order.save();
+
+    res.json({ order });
+  } catch (err) {
+    console.error("Cancel error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
