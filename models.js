@@ -20,7 +20,7 @@ const userSchema = new mongoose.Schema({
 
 /* ══════ ORDER ══════ */
 const orderSchema = new mongoose.Schema({
-  orderId: { type: String, required: true, unique: true, index: true },
+  orderId: { type: String, unique: true, index: true },
   user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 
   // File info
@@ -70,8 +70,8 @@ const orderSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-// Generate orderId before saving
-orderSchema.pre("save", function (next) {
+// Generate orderId before validation (ensures it's set before required check)
+orderSchema.pre("validate", function (next) {
   if (!this.orderId) {
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const rand = String(Math.floor(Math.random() * 9999)).padStart(4, "0");
