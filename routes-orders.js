@@ -61,8 +61,8 @@ router.post("/", auth, async (req, res) => {
 
     res.status(201).json({ order });
   } catch (err) {
-    console.error("Create order error:", err);
-    res.status(500).json({ error: "Server error" });
+    console.error("Create order error:", err.message, err.errors ? JSON.stringify(err.errors) : "");
+    res.status(500).json({ error: err.message || "Server error" });
   }
 });
 

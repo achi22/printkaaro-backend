@@ -31,9 +31,9 @@ const orderSchema = new mongoose.Schema({
   // Print specs
   pages: { type: Number, required: true, min: 1 },
   copies: { type: Number, required: true, min: 1 },
-  colorMode: { type: String, enum: ["bw", "color", "booklet"], default: "bw" },
-  paperSize: { type: String, enum: ["A4", "A3", "A5", "Legal"], default: "A4" },
-  sided: { type: String, enum: ["single", "double"], default: "single" },
+  colorMode: { type: String, default: "bw" },
+  paperSize: { type: String, default: "A4" },
+  sided: { type: String, default: "single" },
   binding: { type: String, default: "No Binding" },
   notes: { type: String, default: "" },
 
@@ -55,18 +55,13 @@ const orderSchema = new mongoose.Schema({
   trackingId: { type: String, default: "" },
 
   // Payment
-  paymentMethod: { type: String, enum: ["upi", "razorpay", "cash", "pending"], default: "pending" },
-  paymentStatus: { type: String, enum: ["pending", "captured", "failed", "refunded"], default: "pending" },
+  paymentMethod: { type: String, default: "pending" },
+  paymentStatus: { type: String, default: "pending" },
   razorpayOrderId: { type: String, default: "" },
   razorpayPaymentId: { type: String, default: "" },
 
   // Status
-  status: {
-    type: String,
-    enum: ["pending", "confirmed", "printing", "ready", "shipped", "delivered", "cancelled"],
-    default: "pending",
-    index: true,
-  },
+  status: { type: String, default: "pending", index: true },
   statusHistory: [{
     status: String,
     timestamp: { type: Date, default: Date.now },
