@@ -81,7 +81,7 @@ router.post("/", auth, async (req, res) => {
       `${isFirstOrder ? "🎉 First order — free delivery!" : ""}`
     );
     // Log the notification URL for admin to see in logs
-    console.log(`📱 WhatsApp Admin: https://wa.me/919239226708?text=${whatsappMsg}`);
+    console.log(`📱 WhatsApp Admin: https://wa.me/918104780153?text=${whatsappMsg}`);
   } catch (err) {
     console.error("Create order error:", err.message, err.errors ? JSON.stringify(err.errors) : "");
     res.status(500).json({ error: err.message || "Server error" });
