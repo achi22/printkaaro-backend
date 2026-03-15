@@ -17,18 +17,27 @@ function auth(req, res, next) {
   }
 }
 
-/* Verify admin access */
+/* Verify admin access - check admin password header OR JWT admin role */
 function adminAuth(req, res, next) {
-  auth(req, res, () => {
-    if (req.userRole !== "admin") {
-      // Also allow admin password in header
-      const adminPass = req.headers["x-admin-password"];
-      if (adminPass !== process.env.ADMIN_PASSWORD) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
-    }
-    next();
-  });
+  // First check admin password header
+  const adminPass = req.headers["x-admin-password"];
+  if (adminPass && adminPass === process.env.ADMIN_PASSWORD) {
+    return next();
+  }
+
+  // Otherwise check JWT for admin role
+  const header = req.headers.authorization;
+  if (header && header.startsWith("Bearer ")) {
+    try {
+      const token = header.split(" ")[1];
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      req.userId = decoded.userId;
+      req.userRole = decoded.role;
+      if (decoded.role === "admin") return next();
+    } catch (err) {}
+  }
+
+  return res.status(403).json({ error: "Admin access required" });
 }
 
 module.exports = { auth, adminAuth };
