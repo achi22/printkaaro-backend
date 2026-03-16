@@ -10,12 +10,13 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 16777216 },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === "application/pdf") cb(null, true);
-    else cb(new Error("Only PDF files are allowed"));
+    const allowed = ["application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp", "image/heic"];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error("Only PDF and image files (JPG, PNG, GIF, WebP) are allowed"));
   },
 });
 
-/* ── UPLOAD PDF (stores in MongoDB) ── */
+/* ── UPLOAD FILE (PDF or Image, stores in MongoDB) ── */
 router.post("/upload", auth, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No PDF uploaded" });
   try {
