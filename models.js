@@ -94,4 +94,13 @@ const fileSchema = new mongoose.Schema({
 
 const FileStore = mongoose.model("FileStore", fileSchema);
 
-module.exports = { User, Order, FileStore };
+/* ══════ VISITOR TRACKER ══════ */
+const visitSchema = new mongoose.Schema({
+  date: { type: String, required: true, unique: true, index: true },
+  count: { type: Number, default: 0 },
+  uniqueIPs: [String],
+}, { timestamps: true });
+
+const Visit = mongoose.model("Visit", visitSchema);
+
+module.exports = { User, Order, FileStore, Visit };

@@ -40,6 +40,43 @@ app.use("/api/auth", authRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/admin", adminRoutes);
 
+/* ── VISIT TRACKER ── */
+app.post("/api/visit", async (req, res) => {
+  try {
+    const { Visit } = require("./models");
+    const today = new Date().toISOString().slice(0, 10);
+    const ip = req.headers["x-forwarded-for"] || req.ip || "unknown";
+    
+    let visit = await Visit.findOne({ date: today });
+    if (!visit) {
+      visit = await Visit.create({ date: today, count: 1, uniqueIPs: [ip] });
+    } else {
+      visit.count += 1;
+      if (!visit.uniqueIPs.includes(ip)) visit.uniqueIPs.push(ip);
+      await visit.save();
+    }
+    res.json({ ok: true });
+  } catch (e) { res.json({ ok: true }); }
+});
+
+app.get("/api/visits", async (req, res) => {
+  try {
+    const { Visit } = require("./models");
+    const days = await Visit.find().sort({ date: -1 }).limit(30);
+    const totalVisits = days.reduce((s, d) => s + d.count, 0);
+    const totalUnique = days.reduce((s, d) => s + (d.uniqueIPs?.length || 0), 0);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const today = days.find(d => d.date === todayStr);
+    res.json({
+      totalVisits,
+      totalUnique,
+      todayVisits: today?.count || 0,
+      todayUnique: today?.uniqueIPs?.length || 0,
+      daily: days.slice(0, 7).map(d => ({ date: d.date, visits: d.count, unique: d.uniqueIPs?.length || 0 })),
+    });
+  } catch (e) { res.json({ totalVisits: 0, totalUnique: 0, todayVisits: 0, todayUnique: 0, daily: [] }); }
+});
+
 /* ── HEALTH CHECK ── */
 app.get("/", (req, res) => {
   res.json({
