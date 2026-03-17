@@ -45,14 +45,14 @@ app.post("/api/visit", async (req, res) => {
   try {
     const { Visit } = require("./models");
     const today = new Date().toISOString().slice(0, 10);
-    const ip = req.headers["x-forwarded-for"] || req.ip || "unknown";
+    const vid = req.body?.vid || req.headers["x-forwarded-for"] || req.ip || "unknown";
     
     let visit = await Visit.findOne({ date: today });
     if (!visit) {
-      visit = await Visit.create({ date: today, count: 1, uniqueIPs: [ip] });
+      visit = await Visit.create({ date: today, count: 1, uniqueIPs: [vid] });
     } else {
       visit.count += 1;
-      if (!visit.uniqueIPs.includes(ip)) visit.uniqueIPs.push(ip);
+      if (!visit.uniqueIPs.includes(vid)) visit.uniqueIPs.push(vid);
       await visit.save();
     }
     res.json({ ok: true });
