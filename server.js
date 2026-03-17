@@ -115,6 +115,15 @@ async function start() {
     const { initGridFS } = require("./models");
     initGridFS();
 
+    // Setup Shiprocket pickup address (runs once, safe to repeat)
+    if (process.env.SHIPROCKET_EMAIL) {
+      try {
+        const shiprocket = require("./routes-shiprocket");
+        await shiprocket.addPickupAddress();
+        console.log("✅ Shiprocket connected");
+      } catch (e) { console.log("ℹ️ Shiprocket setup:", e.message); }
+    }
+
     // Start server
     const server = app.listen(PORT, () => {
       console.log(`✅ PrintKaaro API running on port ${PORT}`);

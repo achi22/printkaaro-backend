@@ -277,4 +277,170 @@ router.delete("/orders-cleanup", adminAuth, async (req, res) => {
   }
 });
 
+/* ══════ SHIPROCKET INTEGRATION ══════ */
+const shiprocket = require("./routes-shiprocket");
+
+/* ── CHECK SERVICEABILITY ── */
+router.post("/shiprocket/check", adminAuth, async (req, res) => {
+  try {
+    const { pincode, weight, cod } = req.body;
+    const result = await shiprocket.checkServiceability(pincode, weight, cod);
+    res.json(result);
+  } catch (e) {
+    console.error("Serviceability check error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ── CREATE SHIPMENT ON SHIPROCKET ── */
+router.post("/shiprocket/ship", adminAuth, async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    const order = await Order.findOne({ $or: [{ _id: orderId }, { orderId }] });
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    // Create order on Shiprocket
+    const srResult = await shiprocket.createShipment(order);
+
+    // Save Shiprocket IDs to order
+    order.shiprocketOrderId = srResult.order_id;
+    order.shiprocketShipmentId = srResult.shipment_id;
+    order.statusHistory.push({ status: order.status, note: `Shiprocket order created: ${srResult.order_id}` });
+    await order.save();
+
+    res.json({
+      success: true,
+      shiprocketOrderId: srResult.order_id,
+      shipmentId: srResult.shipment_id,
+      status: srResult.status,
+    });
+  } catch (e) {
+    console.error("Ship error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ── GET AVAILABLE COURIERS ── */
+router.post("/shiprocket/couriers", adminAuth, async (req, res) => {
+  try {
+    const { shipmentId } = req.body;
+    const result = await shiprocket.getCouriers(shipmentId);
+    
+    // Parse courier list
+    const couriers = (result.data?.available_courier_companies || []).map(c => ({
+      id: c.courier_company_id,
+      name: c.courier_name,
+      rate: c.rate,
+      etd: c.etd, // estimated delivery days
+      rating: c.rating,
+      cod: c.cod,
+      minWeight: c.min_weight,
+    })).sort((a, b) => a.rate - b.rate);
+
+    res.json({ couriers, shipmentId });
+  } catch (e) {
+    console.error("Couriers error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ── ASSIGN COURIER + GENERATE AWB ── */
+router.post("/shiprocket/assign", adminAuth, async (req, res) => {
+  try {
+    const { shipmentId, courierId, orderId } = req.body;
+    
+    // Assign courier
+    const assignResult = await shiprocket.assignCourier(shipmentId, courierId);
+    const awb = assignResult.response?.data?.awb_code || "";
+    const courierName = assignResult.response?.data?.courier_name || "";
+
+    // Generate label
+    let labelUrl = "";
+    try {
+      const labelResult = await shiprocket.generateLabel(shipmentId);
+      labelUrl = labelResult.label_url || "";
+    } catch (e) { console.log("Label gen skipped:", e.message); }
+
+    // Request pickup
+    try {
+      await shiprocket.requestPickup(shipmentId);
+    } catch (e) { console.log("Pickup request skipped:", e.message); }
+
+    // Update order
+    const order = await Order.findOne({ $or: [{ _id: orderId }, { orderId }] });
+    if (order) {
+      order.status = "shipped";
+      order.trackingId = awb;
+      order.deliveryPartner = courierName;
+      order.shiprocketAWB = awb;
+      order.shiprocketLabelUrl = labelUrl;
+      order.statusHistory.push({ status: "shipped", note: `Shipped via ${courierName}, AWB: ${awb}` });
+      await order.save();
+    }
+
+    res.json({
+      success: true,
+      awb,
+      courierName,
+      labelUrl,
+      trackingUrl: awb ? `https://shiprocket.co/tracking/${awb}` : "",
+    });
+  } catch (e) {
+    console.error("Assign error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ── TRACK SHIPMENT ── */
+router.get("/shiprocket/track/:orderId", adminAuth, async (req, res) => {
+  try {
+    const order = await Order.findOne({ $or: [{ _id: req.params.orderId }, { orderId: req.params.orderId }] });
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    let tracking = null;
+    if (order.shiprocketAWB) {
+      tracking = await shiprocket.trackByAWB(order.shiprocketAWB);
+    } else if (order.shiprocketShipmentId) {
+      tracking = await shiprocket.trackShipment(order.shiprocketShipmentId);
+    } else if (order.orderId) {
+      tracking = await shiprocket.trackByOrderId(order.orderId);
+    }
+
+    res.json({ tracking, awb: order.shiprocketAWB, labelUrl: order.shiprocketLabelUrl });
+  } catch (e) {
+    console.error("Track error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ── CANCEL SHIPROCKET SHIPMENT ── */
+router.post("/shiprocket/cancel", adminAuth, async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    const order = await Order.findOne({ $or: [{ _id: orderId }, { orderId }] });
+    if (!order || !order.shiprocketOrderId) return res.status(400).json({ error: "No Shiprocket order found" });
+
+    await shiprocket.cancelShipment(order.shiprocketOrderId);
+    order.statusHistory.push({ status: order.status, note: "Shiprocket shipment cancelled" });
+    order.shiprocketAWB = "";
+    order.trackingId = "";
+    order.deliveryPartner = "";
+    await order.save();
+
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ── PUBLIC TRACKING (for customers) ── */
+router.get("/shiprocket/public-track/:awb", async (req, res) => {
+  try {
+    const result = await shiprocket.trackByAWB(req.params.awb);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: "Tracking unavailable" });
+  }
+});
+
 module.exports = router;

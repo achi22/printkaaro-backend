@@ -46,6 +46,12 @@ const orderSchema = new mongoose.Schema({
   deliveryPartner: { type: String, default: "" },
   trackingId: { type: String, default: "" },
 
+  // Shiprocket
+  shiprocketOrderId: { type: String, default: "" },
+  shiprocketShipmentId: { type: String, default: "" },
+  shiprocketAWB: { type: String, default: "" },
+  shiprocketLabelUrl: { type: String, default: "" },
+
   paymentMethod: { type: String, default: "pending" },
   paymentStatus: { type: String, default: "pending" },
   razorpayOrderId: { type: String, default: "" },
