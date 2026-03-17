@@ -1,8 +1,17 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const { Order, User } = require("./models");
 const { adminAuth } = require("./middleware");
 
 const router = express.Router();
+
+// Safe order lookup — handles both ObjectId and orderId string
+function findOrderQuery(id) {
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    return { $or: [{ _id: id }, { orderId: id }] };
+  }
+  return { orderId: id };
+}
 
 /* ── ADMIN LOGIN ── */
 router.post("/login", (req, res) => {
@@ -85,9 +94,7 @@ router.get("/orders", adminAuth, async (req, res) => {
 router.patch("/orders/:id/status", adminAuth, async (req, res) => {
   try {
     const { status, note } = req.body;
-    const order = await Order.findOne({
-      $or: [{ _id: req.params.id }, { orderId: req.params.id }],
-    });
+    const order = await Order.findOne(findOrderQuery(req.params.id));
 
     if (!order) return res.status(404).json({ error: "Order not found" });
 
@@ -114,7 +121,7 @@ router.patch("/orders/:id", adminAuth, async (req, res) => {
     delete updates.user;
 
     const order = await Order.findOneAndUpdate(
-      { $or: [{ _id: req.params.id }, { orderId: req.params.id }] },
+      findOrderQuery(req.params.id),
       updates,
       { new: true }
     ).populate("user", "name phone email");
@@ -131,7 +138,7 @@ router.patch("/orders/:id/tracking", adminAuth, async (req, res) => {
   try {
     const { deliveryPartner, trackingId } = req.body;
     const order = await Order.findOneAndUpdate(
-      { $or: [{ _id: req.params.id }, { orderId: req.params.id }] },
+      findOrderQuery(req.params.id),
       { deliveryPartner, trackingId },
       { new: true }
     );
@@ -214,9 +221,7 @@ router.post("/orders/manual", adminAuth, async (req, res) => {
 /* ── DELETE ORDER ── */
 router.delete("/orders/:id", adminAuth, async (req, res) => {
   try {
-    const order = await Order.findOneAndDelete({
-      $or: [{ _id: req.params.id }, { orderId: req.params.id }],
-    });
+    const order = await Order.findOneAndDelete(findOrderQuery(req.params.id));
     if (!order) return res.status(404).json({ error: "Order not found" });
     
     // Also delete associated files from FileStore + GridFS
@@ -296,7 +301,7 @@ router.post("/shiprocket/check", adminAuth, async (req, res) => {
 router.post("/shiprocket/ship", adminAuth, async (req, res) => {
   try {
     const { orderId } = req.body;
-    const order = await Order.findOne({ $or: [{ _id: orderId }, { orderId }] });
+    const order = await Order.findOne(findOrderQuery(orderId));
     if (!order) return res.status(404).json({ error: "Order not found" });
 
     // Create order on Shiprocket
@@ -367,7 +372,7 @@ router.post("/shiprocket/assign", adminAuth, async (req, res) => {
     } catch (e) { console.log("Pickup request skipped:", e.message); }
 
     // Update order
-    const order = await Order.findOne({ $or: [{ _id: orderId }, { orderId }] });
+    const order = await Order.findOne(findOrderQuery(orderId));
     if (order) {
       order.status = "shipped";
       order.trackingId = awb;
@@ -394,7 +399,7 @@ router.post("/shiprocket/assign", adminAuth, async (req, res) => {
 /* ── TRACK SHIPMENT ── */
 router.get("/shiprocket/track/:orderId", adminAuth, async (req, res) => {
   try {
-    const order = await Order.findOne({ $or: [{ _id: req.params.orderId }, { orderId: req.params.orderId }] });
+    const order = await Order.findOne(findOrderQuery(req.params.orderId));
     if (!order) return res.status(404).json({ error: "Order not found" });
 
     let tracking = null;
@@ -417,7 +422,7 @@ router.get("/shiprocket/track/:orderId", adminAuth, async (req, res) => {
 router.post("/shiprocket/cancel", adminAuth, async (req, res) => {
   try {
     const { orderId } = req.body;
-    const order = await Order.findOne({ $or: [{ _id: orderId }, { orderId }] });
+    const order = await Order.findOne(findOrderQuery(orderId));
     if (!order || !order.shiprocketOrderId) return res.status(400).json({ error: "No Shiprocket order found" });
 
     await shiprocket.cancelShipment(order.shiprocketOrderId);

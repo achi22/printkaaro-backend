@@ -7,6 +7,13 @@ const { auth } = require("./middleware");
 
 const router = express.Router();
 
+function findOrderQuery(id) {
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    return { $or: [{ _id: id }, { orderId: id }] };
+  }
+  return { orderId: id };
+}
+
 // Multer for small files (< 8MB) — memory is fine
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -220,7 +227,7 @@ router.get("/my", auth, async (req, res) => {
 /* ── GET SINGLE ORDER ── */
 router.get("/:id", auth, async (req, res) => {
   try {
-    const order = await Order.findOne({ $or: [{ _id: req.params.id }, { orderId: req.params.id }] }).populate("user", "name phone email");
+    const order = await Order.findOne(findOrderQuery(req.params.id)).populate("user", "name phone email");
     if (!order) return res.status(404).json({ error: "Order not found" });
     if (order.user._id.toString() !== req.userId && req.userRole !== "admin") return res.status(403).json({ error: "Not authorized" });
     res.json({ order });
@@ -254,7 +261,7 @@ router.get("/:id/file", async (req, res) => {
     const adminPass = req.headers["x-admin-password"] || req.query.adminpass;
     if (!token && adminPass !== process.env.ADMIN_PASSWORD) return res.status(401).json({ error: "Auth required" });
 
-    const order = await Order.findOne({ $or: [{ _id: req.params.id }, { orderId: req.params.id }] });
+    const order = await Order.findOne(findOrderQuery(req.params.id));
     if (!order || !order.filePath) return res.status(404).json({ error: "No file linked" });
 
     const fileIds = order.filePath.split(",").filter(Boolean);
@@ -284,7 +291,7 @@ router.get("/file/:fileId", async (req, res) => {
 /* ── CANCEL ORDER (30 min) ── */
 router.patch("/:id/cancel", auth, async (req, res) => {
   try {
-    const order = await Order.findOne({ $or: [{ _id: req.params.id }, { orderId: req.params.id }] });
+    const order = await Order.findOne(findOrderQuery(req.params.id));
     if (!order) return res.status(404).json({ error: "Order not found" });
     if (order.user.toString() !== req.userId) return res.status(403).json({ error: "Not your order" });
     if (order.status === "cancelled") return res.status(400).json({ error: "Already cancelled" });
