@@ -136,19 +136,22 @@ async function checkServiceability(pincode, weight = 0.5, cod = false) {
   return await srAPI(url);
 }
 
-// ── GET AVAILABLE COURIERS FOR SHIPMENT ──
-async function getCouriers(shipmentId) {
-  const result = await srAPI(`/courier/courierListWithCounts?shipment_id=${shipmentId}`);
+// ── GET AVAILABLE COURIERS VIA SERVICEABILITY ──
+async function getCouriers(shipmentId, pickupPincode, deliveryPincode, weight, cod) {
+  // Use serviceability to get courier list with rates
+  const codVal = cod ? 1 : 0;
+  const url = `/courier/serviceability/?pickup_postcode=${pickupPincode || "732103"}&delivery_postcode=${deliveryPincode}&weight=${weight || 0.5}&cod=${codVal}`;
+  const result = await srAPI(url);
   return result;
 }
 
-// ── ASSIGN COURIER (generates AWB) ──
+// ── ASSIGN COURIER + GENERATE AWB ──
 async function assignCourier(shipmentId, courierId) {
-  const result = await srAPI("/courier/assign/ship", "POST", {
-    shipment_id: [shipmentId],
-    courier_id: courierId,
-  });
-  console.log("✅ Courier assigned, AWB:", result.response?.data?.awb_code);
+  // POST /courier/assign/awb — assigns courier and generates AWB
+  const body = { shipment_id: shipmentId };
+  if (courierId) body.courier_id = courierId;
+  const result = await srAPI("/courier/assign/awb", "POST", body);
+  console.log("✅ AWB assigned:", JSON.stringify(result));
   return result;
 }
 

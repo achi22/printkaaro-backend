@@ -314,11 +314,15 @@ router.post("/shiprocket/ship", adminAuth, async (req, res) => {
     order.statusHistory.push({ status: order.status, note: `Shiprocket order created: ${srResult.order_id}` });
     await order.save();
 
-    // Try to auto-fetch couriers if we have shipment_id
+    // Try to auto-fetch couriers via serviceability
     let couriers = [];
-    if (srResult.shipment_id) {
+    const addr = order.deliveryAddress || {};
+    if (addr.pincode) {
       try {
-        const cr = await shiprocket.getCouriers(srResult.shipment_id);
+        const isCOD = order.paymentMethod === "cash";
+        const pageCount = (order.pages || 1) * (order.copies || 1);
+        const weight = Math.max(0.5, (pageCount * 5) / 1000);
+        const cr = await shiprocket.getCouriers(srResult.shipment_id, "732103", addr.pincode, weight, isCOD);
         couriers = (cr.data?.available_courier_companies || []).map(c => ({
           id: c.courier_company_id,
           name: c.courier_name,
@@ -345,15 +349,22 @@ router.post("/shiprocket/ship", adminAuth, async (req, res) => {
 /* ── GET AVAILABLE COURIERS ── */
 router.post("/shiprocket/couriers", adminAuth, async (req, res) => {
   try {
-    const { shipmentId } = req.body;
-    const result = await shiprocket.getCouriers(shipmentId);
+    const { shipmentId, orderId } = req.body;
     
-    // Parse courier list
+    // Get order to find delivery pincode
+    const order = orderId ? await Order.findOne(findOrderQuery(orderId)) : null;
+    const addr = order?.deliveryAddress || {};
+    const isCOD = order?.paymentMethod === "cash";
+    const pageCount = ((order?.pages || 1) * (order?.copies || 1));
+    const weight = Math.max(0.5, (pageCount * 5) / 1000);
+    
+    const result = await shiprocket.getCouriers(shipmentId, "732103", addr.pincode || "732103", weight, isCOD);
+    
     const couriers = (result.data?.available_courier_companies || []).map(c => ({
       id: c.courier_company_id,
       name: c.courier_name,
       rate: c.rate,
-      etd: c.etd, // estimated delivery days
+      etd: c.etd,
       rating: c.rating,
       cod: c.cod,
       minWeight: c.min_weight,
@@ -371,16 +382,16 @@ router.post("/shiprocket/assign", adminAuth, async (req, res) => {
   try {
     const { shipmentId, courierId, orderId } = req.body;
     
-    // Assign courier
+    // Assign courier + generate AWB
     const assignResult = await shiprocket.assignCourier(shipmentId, courierId);
-    const awb = assignResult.response?.data?.awb_code || "";
-    const courierName = assignResult.response?.data?.courier_name || "";
+    const awb = assignResult.response?.data?.awb_code || assignResult.awb_code || "";
+    const courierName = assignResult.response?.data?.courier_name || assignResult.courier_name || "";
 
     // Generate label
     let labelUrl = "";
     try {
       const labelResult = await shiprocket.generateLabel(shipmentId);
-      labelUrl = labelResult.label_url || "";
+      labelUrl = labelResult.label_url || labelResult.response || "";
     } catch (e) { console.log("Label gen skipped:", e.message); }
 
     // Request pickup
