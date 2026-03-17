@@ -2,7 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const { Readable } = require("stream");
 const mongoose = require("mongoose");
-const { Order, FileStore, getGridFS } = require("./models");
+const { Order, FileStore, getGridFS, Coupon } = require("./models");
 const { auth } = require("./middleware");
 
 const router = express.Router();
@@ -170,36 +170,56 @@ router.post("/upload-chunk", auth, chunkUpload.single("chunk"), async (req, res)
    ══════════════════════════════════════════════ */
 router.post("/", auth, async (req, res) => {
   try {
-    const { fileName, filePath, fileSize, pages, copies, colorMode, paperSize, sided, binding, notes, price, deliveryAddress, paymentMethod } = req.body;
+    const { fileName, filePath, fileSize, pages, copies, colorMode, paperSize, sided, binding, notes, price, deliveryAddress, paymentMethod, couponCode } = req.body;
     if (!fileName || !pages || !copies || !price) return res.status(400).json({ error: "Missing required fields" });
 
     const orderCount = await Order.countDocuments({ user: req.userId, status: { $ne: "cancelled" } });
     const isFirstOrder = orderCount === 0;
     
-    // First order FREE up to ₹499 (limited offer — first 100 new customers)
     let deliveryCharge = 40;
     let discount = 0;
-    if (isFirstOrder) {
-      // Check how many unique users have placed orders (to limit to 100)
-      const totalUniqueCustomers = await Order.distinct("user").then(ids => ids.length);
-      if (totalUniqueCustomers < 100) {
-        discount = Math.min(price, 499); // Free up to ₹499
-        deliveryCharge = 0;
-      } else {
-        deliveryCharge = 0; // Still free delivery for first order
+    let appliedCoupon = "";
+
+    // Apply coupon if provided
+    if (couponCode) {
+      const coupon = await Coupon.findOne({ code: couponCode.toUpperCase().trim(), active: true });
+      if (coupon) {
+        const notExpired = !coupon.expiresAt || new Date(coupon.expiresAt) >= new Date();
+        const notMaxed = coupon.usageLimit === 0 || coupon.usedCount < coupon.usageLimit;
+        const meetsMin = price >= coupon.minOrder;
+        let eligible = notExpired && notMaxed && meetsMin;
+
+        // First order check
+        if (coupon.type === "firstorder" && !isFirstOrder) eligible = false;
+
+        if (eligible) {
+          if (coupon.type === "flat") discount = Math.min(coupon.value, price);
+          else if (coupon.type === "percent") discount = Math.min(Math.ceil(price * coupon.value / 100), coupon.maxDiscount);
+          else if (coupon.type === "firstorder") discount = Math.min(coupon.maxDiscount, price);
+          
+          appliedCoupon = coupon.code;
+          coupon.usedCount += 1;
+          await coupon.save();
+        }
       }
     }
-    if (price >= 499) deliveryCharge = 0;
+
+    // Free delivery for first order or ₹499+
+    if (isFirstOrder || price >= 499) deliveryCharge = 0;
+    // If coupon covers full price, free delivery too
+    if (discount >= price) deliveryCharge = 0;
+    
     const totalPrice = Math.max(0, price - discount) + deliveryCharge;
 
     const order = await Order.create({
       user: req.userId, fileName, filePath: filePath || "", fileSize: fileSize || 0,
       pages, copies, colorMode, paperSize, sided, binding, notes,
-      price, discount, deliveryCharge, totalPrice, deliveryAddress: deliveryAddress || {},
-      paymentMethod: paymentMethod || "pending",
-      paymentStatus: paymentMethod === "cash" ? "captured" : "pending",
+      price, discount, deliveryCharge, totalPrice, couponCode: appliedCoupon,
+      deliveryAddress: deliveryAddress || {},
+      paymentMethod: totalPrice === 0 ? "free" : (paymentMethod || "pending"),
+      paymentStatus: totalPrice === 0 ? "captured" : (paymentMethod === "cash" ? "captured" : "pending"),
       status: "confirmed",
-      statusHistory: [{ status: "confirmed", note: isFirstOrder && discount > 0 ? `First order FREE! ₹${discount} off` : isFirstOrder ? "First order - free delivery!" : "Order placed" }],
+      statusHistory: [{ status: "confirmed", note: discount > 0 ? `Coupon ${appliedCoupon}: ₹${discount} off!` : isFirstOrder ? "First order - free delivery!" : "Order placed" }],
     });
 
     if (filePath) {
@@ -216,6 +236,75 @@ router.post("/", auth, async (req, res) => {
     console.error("Create order error:", err.message);
     res.status(500).json({ error: err.message || "Server error" });
   }
+});
+
+/* ── VALIDATE COUPON ── */
+router.post("/validate-coupon", auth, async (req, res) => {
+  try {
+    const { code, price } = req.body;
+    if (!code) return res.status(400).json({ error: "Coupon code required" });
+
+    const coupon = await Coupon.findOne({ code: code.toUpperCase().trim(), active: true });
+    if (!coupon) return res.status(404).json({ error: "Invalid coupon code" });
+
+    // Check expiry
+    if (coupon.expiresAt && new Date(coupon.expiresAt) < new Date()) {
+      return res.status(400).json({ error: "Coupon expired" });
+    }
+
+    // Check usage limit
+    if (coupon.usageLimit > 0 && coupon.usedCount >= coupon.usageLimit) {
+      return res.status(400).json({ error: "Coupon usage limit reached" });
+    }
+
+    // Check min order
+    if (coupon.minOrder > 0 && price < coupon.minOrder) {
+      return res.status(400).json({ error: `Minimum order ₹${coupon.minOrder} required` });
+    }
+
+    // First order coupon — check if user already has orders
+    if (coupon.type === "firstorder") {
+      const orderCount = await Order.countDocuments({ user: req.userId, status: { $ne: "cancelled" } });
+      if (orderCount > 0) {
+        return res.status(400).json({ error: "This coupon is only for first orders" });
+      }
+    }
+
+    // Calculate discount
+    let discount = 0;
+    if (coupon.type === "flat") {
+      discount = Math.min(coupon.value, price);
+    } else if (coupon.type === "percent") {
+      discount = Math.min(Math.ceil(price * coupon.value / 100), coupon.maxDiscount);
+    } else if (coupon.type === "firstorder") {
+      discount = Math.min(coupon.maxDiscount, price);
+    }
+
+    res.json({
+      valid: true,
+      code: coupon.code,
+      type: coupon.type,
+      discount,
+      description: coupon.description,
+      finalPrice: Math.max(0, price - discount),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── CHECK IF FIRST ORDER (for auto-apply) ── */
+router.get("/check-first-order", auth, async (req, res) => {
+  try {
+    const orderCount = await Order.countDocuments({ user: req.userId, status: { $ne: "cancelled" } });
+    const isFirst = orderCount === 0;
+    
+    // Check if firstorder coupon exists and is active
+    let coupon = null;
+    if (isFirst) {
+      coupon = await Coupon.findOne({ type: "firstorder", active: true });
+    }
+    
+    res.json({ isFirstOrder: isFirst, coupon: coupon ? { code: coupon.code, maxDiscount: coupon.maxDiscount, description: coupon.description } : null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 /* ── TRACK ORDER (public) ── */
