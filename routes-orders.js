@@ -8,7 +8,7 @@ const router = express.Router();
 // Multer - store in memory, then save to MongoDB
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 16777216 },
+  limits: { fileSize: 200 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ["application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp", "image/heic"];
     if (allowed.includes(file.mimetype)) cb(null, true);
@@ -18,18 +18,20 @@ const upload = multer({
 
 /* ── UPLOAD FILE (PDF or Image, stores in MongoDB) ── */
 router.post("/upload", auth, upload.single("file"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No PDF uploaded" });
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   try {
+    console.log(`📁 Uploading: ${req.file.originalname} (${(req.file.size/1024).toFixed(0)}KB, ${req.file.mimetype})`);
     const stored = await FileStore.create({
       fileName: req.file.originalname,
       mimeType: req.file.mimetype,
       size: req.file.size,
       data: req.file.buffer.toString("base64"),
     });
+    console.log(`✅ Stored as: ${stored._id}`);
     res.json({ fileName: req.file.originalname, filePath: stored._id.toString(), fileSize: req.file.size });
   } catch (err) {
-    console.error("Upload error:", err.message);
-    res.status(500).json({ error: "Upload failed" });
+    console.error("❌ Upload error:", err.message);
+    res.status(500).json({ error: "Upload failed: " + err.message });
   }
 });
 

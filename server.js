@@ -30,7 +30,8 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "200mb" }));
+app.use(express.urlencoded({ limit: "200mb", extended: true }));
 
 // Serve uploaded files (protected in routes, but static fallback)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
@@ -95,7 +96,7 @@ app.get("/", (req, res) => {
 app.use((err, req, res, next) => {
   console.error("Error:", err.message);
   if (err.code === "LIMIT_FILE_SIZE") {
-    return res.status(400).json({ error: "File too large. Maximum 50MB allowed." });
+    return res.status(400).json({ error: "File too large. Maximum 200MB allowed." });
   }
   res.status(500).json({ error: err.message || "Internal server error" });
 });
@@ -111,7 +112,7 @@ async function start() {
     console.log("✅ MongoDB connected!");
 
     // Start server
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`✅ PrintKaaro API running on port ${PORT}`);
       console.log(`   Health: http://localhost:${PORT}/`);
 
@@ -122,6 +123,8 @@ async function start() {
       }, 14 * 60 * 1000); // Every 14 minutes
       console.log("⏰ Keep-alive enabled (every 14 min)");
     });
+    server.timeout = 10 * 60 * 1000; // 10 min timeout for large uploads
+    server.keepAliveTimeout = 120000;
   } catch (err) {
     console.error("❌ Failed to start:", err.message);
     process.exit(1);
