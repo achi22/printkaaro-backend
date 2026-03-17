@@ -219,12 +219,16 @@ router.delete("/orders/:id", adminAuth, async (req, res) => {
     });
     if (!order) return res.status(404).json({ error: "Order not found" });
     
-    // Also delete associated files from FileStore
+    // Also delete associated files from FileStore + GridFS
     if (order.filePath) {
-      const { FileStore } = require("./models");
+      const { FileStore, getGridFS } = require("./models");
       const fileIds = order.filePath.split(",").filter(Boolean);
       for (const fid of fileIds) {
-        try { await FileStore.findByIdAndDelete(fid); } catch (e) {}
+        try {
+          const f = await FileStore.findById(fid);
+          if (f && f.gridfsId) { try { const bucket = getGridFS(); if (bucket) await bucket.delete(f.gridfsId); } catch (e) {} }
+          await FileStore.findByIdAndDelete(fid);
+        } catch (e) {}
       }
     }
     
@@ -246,13 +250,17 @@ router.delete("/orders-cleanup", adminAuth, async (req, res) => {
       updatedAt: { $lte: sevenDaysAgo },
     });
     
-    // Delete associated files
-    const { FileStore } = require("./models");
+    // Delete associated files + GridFS
+    const { FileStore, getGridFS } = require("./models");
     for (const order of oldOrders) {
       if (order.filePath) {
         const fileIds = order.filePath.split(",").filter(Boolean);
         for (const fid of fileIds) {
-          try { await FileStore.findByIdAndDelete(fid); } catch (e) {}
+          try {
+            const f = await FileStore.findById(fid);
+            if (f && f.gridfsId) { try { const bucket = getGridFS(); if (bucket) await bucket.delete(f.gridfsId); } catch (e) {} }
+            await FileStore.findByIdAndDelete(fid);
+          } catch (e) {}
         }
       }
     }

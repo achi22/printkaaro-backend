@@ -1,11 +1,14 @@
 const express = require("express");
 const multer = require("multer");
-const { Order, FileStore } = require("./models");
+const { Readable } = require("stream");
+const { Order, FileStore, getGridFS } = require("./models");
 const { auth } = require("./middleware");
 
 const router = express.Router();
 
-// Multer - store in memory, then save to MongoDB
+const GRIDFS_THRESHOLD = 14 * 1024 * 1024; // 14MB — files larger than this go to GridFS
+
+// Multer - store in memory, then save to MongoDB or GridFS
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 200 * 1024 * 1024 },
@@ -16,19 +19,52 @@ const upload = multer({
   },
 });
 
-/* ── UPLOAD FILE (PDF or Image, stores in MongoDB) ── */
+/* ── UPLOAD FILE (small = base64, large = GridFS) ── */
 router.post("/upload", auth, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   try {
-    console.log(`📁 Uploading: ${req.file.originalname} (${(req.file.size/1024).toFixed(0)}KB, ${req.file.mimetype})`);
-    const stored = await FileStore.create({
-      fileName: req.file.originalname,
-      mimeType: req.file.mimetype,
-      size: req.file.size,
-      data: req.file.buffer.toString("base64"),
-    });
-    console.log(`✅ Stored as: ${stored._id}`);
-    res.json({ fileName: req.file.originalname, filePath: stored._id.toString(), fileSize: req.file.size });
+    const sizeMB = (req.file.size / (1024 * 1024)).toFixed(1);
+    console.log(`📁 Uploading: ${req.file.originalname} (${sizeMB}MB, ${req.file.mimetype})`);
+
+    if (req.file.size <= GRIDFS_THRESHOLD) {
+      // Small file — store as base64 in document
+      const stored = await FileStore.create({
+        fileName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        size: req.file.size,
+        data: req.file.buffer.toString("base64"),
+      });
+      console.log(`✅ Stored in doc: ${stored._id}`);
+      res.json({ fileName: req.file.originalname, filePath: stored._id.toString(), fileSize: req.file.size });
+    } else {
+      // Large file — store in GridFS
+      const bucket = getGridFS();
+      if (!bucket) return res.status(500).json({ error: "Storage not ready, try again" });
+
+      const uploadStream = bucket.openUploadStream(req.file.originalname, {
+        contentType: req.file.mimetype,
+      });
+
+      const readable = new Readable();
+      readable.push(req.file.buffer);
+      readable.push(null);
+
+      await new Promise((resolve, reject) => {
+        readable.pipe(uploadStream)
+          .on("finish", resolve)
+          .on("error", reject);
+      });
+
+      const stored = await FileStore.create({
+        fileName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        size: req.file.size,
+        data: "",
+        gridfsId: uploadStream.id,
+      });
+      console.log(`✅ Stored in GridFS: ${stored._id} (gridfs: ${uploadStream.id})`);
+      res.json({ fileName: req.file.originalname, filePath: stored._id.toString(), fileSize: req.file.size });
+    }
   } catch (err) {
     console.error("❌ Upload error:", err.message);
     res.status(500).json({ error: "Upload failed: " + err.message });
@@ -102,7 +138,29 @@ router.get("/:id", auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
-/* ── DOWNLOAD PDF (from MongoDB) ── */
+/* ── Helper: stream file to response (handles both base64 and GridFS) ── */
+async function streamFile(stored, res) {
+  if (stored.gridfsId) {
+    // Large file — stream from GridFS
+    const bucket = getGridFS();
+    if (!bucket) return res.status(500).json({ error: "Storage not ready" });
+    res.setHeader("Content-Type", stored.mimeType);
+    res.setHeader("Content-Disposition", `attachment; filename="${stored.fileName}"`);
+    res.setHeader("Content-Length", stored.size);
+    const downloadStream = bucket.openDownloadStream(stored.gridfsId);
+    downloadStream.pipe(res);
+    downloadStream.on("error", () => res.status(500).end());
+  } else {
+    // Small file — base64 in document
+    const buffer = Buffer.from(stored.data, "base64");
+    res.setHeader("Content-Type", stored.mimeType);
+    res.setHeader("Content-Disposition", `attachment; filename="${stored.fileName}"`);
+    res.setHeader("Content-Length", buffer.length);
+    res.send(buffer);
+  }
+}
+
+/* ── DOWNLOAD FILE BY ORDER ── */
 router.get("/:id/file", async (req, res) => {
   try {
     const token = req.headers.authorization?.split(" ")[1] || req.query.token;
@@ -116,11 +174,7 @@ router.get("/:id/file", async (req, res) => {
     if (fileIds.length === 1) {
       const stored = await FileStore.findById(fileIds[0]);
       if (!stored) return res.status(404).json({ error: "File not found in database" });
-      const buffer = Buffer.from(stored.data, "base64");
-      res.setHeader("Content-Type", stored.mimeType);
-      res.setHeader("Content-Disposition", `attachment; filename="${stored.fileName}"`);
-      res.setHeader("Content-Length", buffer.length);
-      return res.send(buffer);
+      return streamFile(stored, res);
     }
     // Multiple files - return list
     const fileList = [];
@@ -137,11 +191,7 @@ router.get("/file/:fileId", async (req, res) => {
     if (!token && adminPass !== process.env.ADMIN_PASSWORD) return res.status(401).json({ error: "Auth required" });
     const stored = await FileStore.findById(req.params.fileId);
     if (!stored) return res.status(404).json({ error: "File not found" });
-    const buffer = Buffer.from(stored.data, "base64");
-    res.setHeader("Content-Type", stored.mimeType);
-    res.setHeader("Content-Disposition", `attachment; filename="${stored.fileName}"`);
-    res.setHeader("Content-Length", buffer.length);
-    res.send(buffer);
+    return streamFile(stored, res);
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 

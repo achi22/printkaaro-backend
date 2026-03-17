@@ -111,6 +111,10 @@ async function start() {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log("✅ MongoDB connected!");
 
+    // Initialize GridFS for large file storage
+    const { initGridFS } = require("./models");
+    initGridFS();
+
     // Start server
     const server = app.listen(PORT, () => {
       console.log(`✅ PrintKaaro API running on port ${PORT}`);
