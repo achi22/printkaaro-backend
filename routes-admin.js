@@ -1,6 +1,6 @@
 const express = require("express");
 const mongoose = require("mongoose");
-const { Order, User } = require("./models");
+const { Order, User, Coupon } = require("./models");
 const { adminAuth } = require("./middleware");
 
 const router = express.Router();
@@ -280,6 +280,55 @@ router.delete("/orders-cleanup", adminAuth, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: "Server error" });
   }
+});
+
+/* ══════ COUPON MANAGEMENT ══════ */
+
+/* ── LIST ALL COUPONS ── */
+router.get("/coupons", adminAuth, async (req, res) => {
+  try {
+    const coupons = await Coupon.find().sort({ createdAt: -1 });
+    res.json({ coupons });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── CREATE COUPON ── */
+router.post("/coupons", adminAuth, async (req, res) => {
+  try {
+    const { code, type, value, maxDiscount, minOrder, usageLimit, description, expiresAt } = req.body;
+    if (!code) return res.status(400).json({ error: "Coupon code required" });
+    const coupon = await Coupon.create({
+      code: code.toUpperCase().trim(),
+      type: type || "flat",
+      value: value || 0,
+      maxDiscount: maxDiscount || 499,
+      minOrder: minOrder || 0,
+      usageLimit: usageLimit || 0,
+      description: description || "",
+      expiresAt: expiresAt || null,
+    });
+    res.status(201).json({ coupon });
+  } catch (e) {
+    if (e.code === 11000) return res.status(400).json({ error: "Coupon code already exists" });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ── UPDATE COUPON ── */
+router.patch("/coupons/:id", adminAuth, async (req, res) => {
+  try {
+    const coupon = await Coupon.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!coupon) return res.status(404).json({ error: "Coupon not found" });
+    res.json({ coupon });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── DELETE COUPON ── */
+router.delete("/coupons/:id", adminAuth, async (req, res) => {
+  try {
+    await Coupon.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 /* ══════ SHIPROCKET INTEGRATION ══════ */

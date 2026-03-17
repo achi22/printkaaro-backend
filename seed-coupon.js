@@ -1,44 +1,45 @@
-/**
- * Run once to seed the FIRSTORDER coupon:
- *   node seed-coupon.js
- * 
- * Or just create it from Admin Panel → Coupons → + New Coupon
- */
 require("dotenv").config();
 const mongoose = require("mongoose");
-const { Coupon } = require("./models");
 
 async function seed() {
   await mongoose.connect(process.env.MONGODB_URI);
   console.log("Connected to MongoDB");
 
-  // Check if FIRSTORDER already exists
+  // Define schema inline so it works even if models.js is outdated
+  const couponSchema = new mongoose.Schema({
+    code: { type: String, required: true, unique: true, uppercase: true, trim: true },
+    type: { type: String, enum: ["flat", "percent", "firstorder"], default: "flat" },
+    value: { type: Number, default: 0 },
+    maxDiscount: { type: Number, default: 499 },
+    minOrder: { type: Number, default: 0 },
+    usageLimit: { type: Number, default: 0 },
+    usedCount: { type: Number, default: 0 },
+    active: { type: Boolean, default: true },
+    expiresAt: { type: Date, default: null },
+    description: { type: String, default: "" },
+  }, { timestamps: true });
+
+  const Coupon = mongoose.models.Coupon || mongoose.model("Coupon", couponSchema);
+
   const existing = await Coupon.findOne({ code: "FIRSTORDER" });
   if (existing) {
-    console.log("FIRSTORDER coupon already exists:", existing.code, "active:", existing.active);
-    await mongoose.disconnect();
-    return;
+    console.log("FIRSTORDER already exists! Active:", existing.active, "Used:", existing.usedCount);
+  } else {
+    await Coupon.create({
+      code: "FIRSTORDER",
+      type: "firstorder",
+      value: 0,
+      maxDiscount: 499,
+      minOrder: 0,
+      description: "First order FREE up to Rs.499!",
+      usageLimit: 100,
+      active: true,
+    });
+    console.log("FIRSTORDER coupon created! Max ₹499 off, 100 uses");
   }
 
-  const coupon = await Coupon.create({
-    code: "FIRSTORDER",
-    type: "firstorder",
-    value: 0,
-    maxDiscount: 499,
-    minOrder: 0,
-    description: "First order FREE up to ₹499 — limited time offer!",
-    usageLimit: 100, // First 100 customers
-    active: true,
-    expiresAt: null, // No expiry — disable manually from admin
-  });
-
-  console.log("✅ FIRSTORDER coupon created!");
-  console.log("   Code:", coupon.code);
-  console.log("   Type:", coupon.type);
-  console.log("   Max discount: ₹" + coupon.maxDiscount);
-  console.log("   Usage limit:", coupon.usageLimit);
-  
   await mongoose.disconnect();
+  console.log("Done!");
 }
 
 seed().catch(e => { console.error("Error:", e.message); process.exit(1); });

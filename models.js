@@ -37,6 +37,7 @@ const orderSchema = new mongoose.Schema({
 
   price: { type: Number, required: true },
   discount: { type: Number, default: 0 },
+  couponCode: { type: String, default: "" },
   deliveryCharge: { type: Number, default: 0 },
   totalPrice: { type: Number, required: true },
 
@@ -114,4 +115,19 @@ const visitSchema = new mongoose.Schema({
 
 const Visit = mongoose.model("Visit", visitSchema);
 
-module.exports = { User, Order, FileStore, Visit, initGridFS, getGridFS };
+/* ══════ COUPONS ══════ */
+const couponSchema = new mongoose.Schema({
+  code: { type: String, required: true, unique: true, uppercase: true, trim: true, index: true },
+  type: { type: String, enum: ["flat", "percent", "firstorder"], default: "flat" },
+  value: { type: Number, default: 0 }, // flat=₹ amount, percent=%, firstorder=max ₹ off
+  maxDiscount: { type: Number, default: 499 }, // cap for percent coupons
+  minOrder: { type: Number, default: 0 },
+  usageLimit: { type: Number, default: 0 }, // 0=unlimited
+  usedCount: { type: Number, default: 0 },
+  active: { type: Boolean, default: true },
+  expiresAt: { type: Date, default: null },
+  description: { type: String, default: "" },
+}, { timestamps: true });
+const Coupon = mongoose.model("Coupon", couponSchema);
+
+module.exports = { User, Order, FileStore, Visit, Coupon, initGridFS, getGridFS };
