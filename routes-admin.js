@@ -306,18 +306,35 @@ router.post("/shiprocket/ship", adminAuth, async (req, res) => {
 
     // Create order on Shiprocket
     const srResult = await shiprocket.createShipment(order);
+    console.log("📦 SR result:", JSON.stringify(srResult));
 
     // Save Shiprocket IDs to order
-    order.shiprocketOrderId = srResult.order_id;
-    order.shiprocketShipmentId = srResult.shipment_id;
+    order.shiprocketOrderId = String(srResult.order_id || "");
+    order.shiprocketShipmentId = String(srResult.shipment_id || "");
     order.statusHistory.push({ status: order.status, note: `Shiprocket order created: ${srResult.order_id}` });
     await order.save();
+
+    // Try to auto-fetch couriers if we have shipment_id
+    let couriers = [];
+    if (srResult.shipment_id) {
+      try {
+        const cr = await shiprocket.getCouriers(srResult.shipment_id);
+        couriers = (cr.data?.available_courier_companies || []).map(c => ({
+          id: c.courier_company_id,
+          name: c.courier_name,
+          rate: c.rate,
+          etd: c.etd,
+          rating: c.rating,
+        })).sort((a, b) => a.rate - b.rate);
+      } catch (e) { console.log("Auto-fetch couriers skipped:", e.message); }
+    }
 
     res.json({
       success: true,
       shiprocketOrderId: srResult.order_id,
       shipmentId: srResult.shipment_id,
       status: srResult.status,
+      couriers,
     });
   } catch (e) {
     console.error("Ship error:", e.message);

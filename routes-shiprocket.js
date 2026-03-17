@@ -118,8 +118,15 @@ async function createShipment(order) {
 
   console.log("📦 Creating Shiprocket order:", order.orderId);
   const result = await srAPI("/orders/create/adhoc", "POST", payload);
-  console.log("✅ Shiprocket order created:", result.order_id, "Shipment:", result.shipment_id);
-  return result;
+  console.log("✅ Shiprocket response:", JSON.stringify(result));
+  
+  // Shiprocket returns different formats
+  const srOrderId = result.order_id || result.order?.id || "";
+  const srShipmentId = result.shipment_id || result.payload?.shipment_id || "";
+  
+  if (!srOrderId) throw new Error("Shiprocket did not return an order ID: " + JSON.stringify(result));
+  
+  return { order_id: srOrderId, shipment_id: srShipmentId, status: result.status };
 }
 
 // ── CHECK COURIER SERVICEABILITY ──
@@ -131,9 +138,7 @@ async function checkServiceability(pincode, weight = 0.5, cod = false) {
 
 // ── GET AVAILABLE COURIERS FOR SHIPMENT ──
 async function getCouriers(shipmentId) {
-  const result = await srAPI(`/courier/courierListWithCounts`, "POST", {
-    shipment_id: shipmentId,
-  });
+  const result = await srAPI(`/courier/courierListWithCounts?shipment_id=${shipmentId}`);
   return result;
 }
 
