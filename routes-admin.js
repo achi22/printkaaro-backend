@@ -321,7 +321,7 @@ router.post("/shiprocket/ship", adminAuth, async (req, res) => {
       try {
         const isCOD = order.paymentMethod === "cash";
         const pageCount = (order.pages || 1) * (order.copies || 1);
-        const weight = Math.max(0.5, (pageCount * 5) / 1000);
+        const isBothSides = order?.sided === "double" || order?.sided === "both"; const sheets = isBothSides ? Math.ceil(pageCount / 2) : pageCount; const weight = Math.max(0.25, (sheets * 4) / 1000);
         const cr = await shiprocket.getCouriers(srResult.shipment_id, "732103", addr.pincode, weight, isCOD);
         couriers = (cr.data?.available_courier_companies || []).map(c => ({
           id: c.courier_company_id,
@@ -356,7 +356,7 @@ router.post("/shiprocket/couriers", adminAuth, async (req, res) => {
     const addr = order?.deliveryAddress || {};
     const isCOD = order?.paymentMethod === "cash";
     const pageCount = ((order?.pages || 1) * (order?.copies || 1));
-    const weight = Math.max(0.5, (pageCount * 5) / 1000);
+    const isBothSides = order?.sided === "double" || order?.sided === "both"; const sheets = isBothSides ? Math.ceil(pageCount / 2) : pageCount; const weight = Math.max(0.25, (sheets * 4) / 1000);
     
     const result = await shiprocket.getCouriers(shipmentId, "732103", addr.pincode || "732103", weight, isCOD);
     

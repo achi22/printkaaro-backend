@@ -175,18 +175,31 @@ router.post("/", auth, async (req, res) => {
 
     const orderCount = await Order.countDocuments({ user: req.userId, status: { $ne: "cancelled" } });
     const isFirstOrder = orderCount === 0;
+    
+    // First order FREE up to ₹499 (limited offer — first 100 new customers)
     let deliveryCharge = 40;
-    if (isFirstOrder || price >= 499) deliveryCharge = 0;
-    const totalPrice = price + deliveryCharge;
+    let discount = 0;
+    if (isFirstOrder) {
+      // Check how many unique users have placed orders (to limit to 100)
+      const totalUniqueCustomers = await Order.distinct("user").then(ids => ids.length);
+      if (totalUniqueCustomers < 100) {
+        discount = Math.min(price, 499); // Free up to ₹499
+        deliveryCharge = 0;
+      } else {
+        deliveryCharge = 0; // Still free delivery for first order
+      }
+    }
+    if (price >= 499) deliveryCharge = 0;
+    const totalPrice = Math.max(0, price - discount) + deliveryCharge;
 
     const order = await Order.create({
       user: req.userId, fileName, filePath: filePath || "", fileSize: fileSize || 0,
       pages, copies, colorMode, paperSize, sided, binding, notes,
-      price, deliveryCharge, totalPrice, deliveryAddress: deliveryAddress || {},
+      price, discount, deliveryCharge, totalPrice, deliveryAddress: deliveryAddress || {},
       paymentMethod: paymentMethod || "pending",
       paymentStatus: paymentMethod === "cash" ? "captured" : "pending",
       status: "confirmed",
-      statusHistory: [{ status: "confirmed", note: isFirstOrder ? "First order - free delivery!" : "Order placed" }],
+      statusHistory: [{ status: "confirmed", note: isFirstOrder && discount > 0 ? `First order FREE! ₹${discount} off` : isFirstOrder ? "First order - free delivery!" : "Order placed" }],
     });
 
     if (filePath) {

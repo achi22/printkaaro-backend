@@ -71,10 +71,13 @@ async function createShipment(order) {
   const addr = order.deliveryAddress || {};
 
   // Calculate dimensions & weight for printed documents
-  // Rough estimate: 100 pages ≈ 1cm thick, 500g
+  // 500 sheets (A4 80gsm) = 2kg, so 1 page = 4g
+  // Both sides: 1 sheet = 2 pages, so pageCount pages both-sided = pageCount/2 sheets
   const pageCount = (order.pages || 1) * (order.copies || 1);
-  const weight = Math.max(0.5, (pageCount * 5) / 1000); // ~5g per page, min 500g
-  const height = Math.max(2, Math.ceil(pageCount * 0.01)); // cm
+  const isBothSides = order.sided === "double" || order.sided === "both";
+  const sheets = isBothSides ? Math.ceil(pageCount / 2) : pageCount;
+  const weight = Math.max(0.25, (sheets * 4) / 1000); // 4g per sheet, min 250g
+  const height = Math.max(1, Math.ceil(sheets * 0.01)); // ~0.1mm per sheet
 
   const dimensions = {
     length: order.paperSize === "A3" ? 42 : 30, // cm
